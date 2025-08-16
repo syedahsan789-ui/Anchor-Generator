@@ -1,0 +1,6 @@
+{
+  "name": "AI News Anchor Generator",
+  "description": "An application that generates a video of a news anchor by analyzing a user-provided script to determine the appropriate background, then combining it with a base prompt to create a text-to-image request.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}

@@ -1,0 +1,1 @@
+export const BASE_ANCHOR_PROMPT: string = "A news anchor stands behind a desk in a professional news studio, looking directly at the camera with a neutral, professional expression. They are wearing a sharp suit. Ultra-realistic, 8k, photorealistic, sharp focus.";
