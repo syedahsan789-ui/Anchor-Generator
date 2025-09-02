@@ -1,6 +1,5 @@
-
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { processArticleUrl, processHeadline, generateContentImages, processMultipleHeadlines, generateImagesForMultipleHeadlines, regenerateThumbnail, generateVideoImages, generateParagraphVideoPrompts } from './services/geminiService';
+import { processArticleUrl, processHeadline, generateContentImages, processMultipleHeadlines, generateImagesForMultipleHeadlines, regenerateThumbnail, generateVideoImages, generateParagraphVideoPrompts, generateTimelineScript } from './services/geminiService';
 import { BASE_ANCHOR_PROMPT } from './constants';
 import InputPanel from './components/ScriptInput';
 import { VideoDisplay } from './components/VideoDisplay';
@@ -13,6 +12,9 @@ import VideoBrollDisplay from './components/VideoBrollDisplay';
 import SocialIntegrations from './components/SocialIntegrations';
 import VideoPromptsDisplay from './components/VideoPromptsDisplay';
 import ParagraphVideoPrompts from './components/ParagraphVideoPrompts';
+import TimelineDisplay from './components/TimelineDisplay';
+import VideoAssemblyTool from './components/VideoAssemblyTool';
+import StoryVideoImagesDisplay from './components/StoryVideoImagesDisplay';
 
 function App() {
   // Common State
@@ -46,6 +48,7 @@ function App() {
   const [postImages, setPostImages] = useState<(string | null)[] | null>(null);
   const [socialMediaContent, setSocialMediaContent] = useState<SocialMediaContent | null>(null);
   const [finalPrompt, setFinalPrompt] = useState<string>('');
+  const [videoImagePrompts, setVideoImagePrompts] = useState<string[] | null>(null);
   const [videoImages, setVideoImages] = useState<string[] | null>(null);
   const [isGeneratingVideoImages, setIsGeneratingVideoImages] = useState<boolean>(false);
   const [introVideoPrompt, setIntroVideoPrompt] = useState<string | null>(null);
@@ -53,38 +56,13 @@ function App() {
   const [paragraphPrompts, setParagraphPrompts] = useState<{paragraph: string, prompt: string}[] | null>(null);
   const [isGeneratingParagraphPrompts, setIsGeneratingParagraphPrompts] = useState<boolean>(false);
   const [paragraphPromptsError, setParagraphPromptsError] = useState<string | null>(null);
-
-  // Speech Synthesis State
-  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  const [timelineScript, setTimelineScript] = useState<string | null>(null);
+  const [isGeneratingTimeline, setIsGeneratingTimeline] = useState<boolean>(false);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
+  const [storyVideoImages, setStoryVideoImages] = useState<string[] | null>(null);
+  const [isGeneratingStoryVideoImages, setIsGeneratingStoryVideoImages] = useState<boolean>(false);
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [selectedVoiceURI, setSelectedVoiceURI] = useState<string | null>(null);
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
-  // Effect to load speech synthesis voices
-  useEffect(() => {
-    const loadVoices = () => {
-      const availableVoices = window.speechSynthesis.getVoices();
-      if (availableVoices.length > 0) {
-        const englishVoices = availableVoices.filter(v => v.lang.startsWith('en'));
-        setVoices(englishVoices);
-        if (!selectedVoiceURI && englishVoices.length > 0) {
-          const googleVoice = englishVoices.find(v => v.name.includes('Google'));
-          setSelectedVoiceURI(googleVoice ? googleVoice.voiceURI : englishVoices[0].voiceURI);
-        }
-      }
-    };
-    
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-    loadVoices();
-
-    return () => {
-      window.speechSynthesis.onvoiceschanged = null;
-      if (window.speechSynthesis.speaking) {
-        window.speechSynthesis.cancel();
-      }
-    };
-  }, [selectedVoiceURI]);
 
   // Effect to generate detailed, paragraph-by-paragraph video prompts
   useEffect(() => {
@@ -118,10 +96,64 @@ function App() {
     generatePrompts();
   }, [generatedScript, isLoading, mode]);
 
+  // Effect to generate timeline script
+  useEffect(() => {
+    const generateTimeline = async () => {
+        if (generatedScript && !isLoading) { // Only run when script is set and main loading is done
+            try {
+                setIsGeneratingTimeline(true);
+                setTimelineError(null);
+                setTimelineScript(null);
+                
+                let scriptToProcess = generatedScript;
+                // For multi-story, we only want the main script part for the timeline
+                if (mode === 'multi' && generatedScript.includes('FULL SCRIPT:')) {
+                    scriptToProcess = generatedScript.split('FULL SCRIPT:')[1].trim();
+                }
+
+                if (scriptToProcess) {
+                    const newTimelineScript = await generateTimelineScript(scriptToProcess);
+                    setTimelineScript(newTimelineScript);
+                }
+
+            } catch (e) {
+                console.error("Failed to generate timeline script:", e);
+                const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
+                setTimelineError(`Failed to generate timeline script. ${errorMessage}`);
+            } finally {
+                setIsGeneratingTimeline(false);
+            }
+        }
+    };
+    generateTimeline();
+  }, [generatedScript, isLoading, mode]);
+
+  // Effect to generate story video images
+  useEffect(() => {
+    const generateImages = async () => {
+        if (storyVideoPrompts && storyVideoPrompts.length > 0 && !isLoading) {
+            setIsGeneratingStoryVideoImages(true);
+            setStoryVideoImages(null);
+            try {
+                const images = await generateVideoImages(storyVideoPrompts);
+                setStoryVideoImages(images);
+            } catch (e) {
+                console.error("Failed to generate story video images:", e);
+                const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
+                setError(prevError => {
+                    const newError = `Failed to generate story video images. ${errorMessage}`;
+                    return prevError ? `${prevError}\n${newError}` : newError;
+                });
+            } finally {
+                setIsGeneratingStoryVideoImages(false);
+            }
+        }
+    };
+    generateImages();
+  }, [storyVideoPrompts, isLoading]);
+
+
   const resetState = () => {
-      if (window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
       setIsLoading(true);
       setError(null);
       setGeneratedImage16x9(null);
@@ -134,16 +166,20 @@ function App() {
       setFinalPrompt('');
       setEditableThumbnailPrompt(null);
       setAnalyzedTopic(null);
+      setVideoImagePrompts(null);
       setVideoImages(null);
       setIsGeneratingVideoImages(false);
       setIntroVideoPrompt(null);
       setStoryVideoPrompts(null);
-      setIsSpeaking(false);
       setIsDownloading(false);
-      utteranceRef.current = null;
       setParagraphPrompts(null);
       setIsGeneratingParagraphPrompts(false);
       setParagraphPromptsError(null);
+      setTimelineScript(null);
+      setIsGeneratingTimeline(false);
+      setTimelineError(null);
+      setStoryVideoImages(null);
+      setIsGeneratingStoryVideoImages(false);
   }
 
   const handleGenerateSingle = useCallback(async () => {
@@ -180,7 +216,7 @@ function App() {
         backgroundDescription, 
         postImageDescription,
         socialMediaContent: newSocialContent,
-        videoImagePrompts,
+        videoImagePrompts: newVideoImagePrompts,
         storyVideoPrompts: newStoryPrompts,
       } = content;
       
@@ -188,6 +224,8 @@ function App() {
       setAnalyzedTopic(topic);
       setSocialMediaContent(newSocialContent);
       setStoryVideoPrompts(newStoryPrompts);
+      setVideoImagePrompts(newVideoImagePrompts);
+      setVideoImages(null);
       
       const imageResults = await generateContentImages(
         backgroundDescription, 
@@ -199,24 +237,6 @@ function App() {
       setGeneratedImage16x9(imageResults.image16x9);
       setGeneratedImage9x16(imageResults.image9x16);
       setPostImages(imageResults.postImage ? [imageResults.postImage] : null);
-
-      // Generate B-Roll Video Images
-      if (videoImagePrompts && videoImagePrompts.length > 0) {
-        setIsGeneratingVideoImages(true);
-        try {
-            const bRollImages = await generateVideoImages(videoImagePrompts);
-            setVideoImages(bRollImages);
-        } catch (e) {
-            console.error(e);
-            const bRollError = e instanceof Error ? e.message : 'An unknown error occurred.';
-            setError(prevError => {
-                const newError = `Failed to generate B-Roll images. ${bRollError}`;
-                return prevError ? `${prevError}\n${newError}` : newError;
-            });
-        } finally {
-            setIsGeneratingVideoImages(false);
-        }
-      }
 
     } catch (e) {
       console.error(e);
@@ -244,7 +264,7 @@ function App() {
             thumbnailPrompt,
             postImageDescriptions,
             socialMediaContent: newSocialContent,
-            videoImagePrompts,
+            videoImagePrompts: newVideoImagePrompts,
             introVideoPrompt,
             storyVideoPrompts,
         } = content;
@@ -256,6 +276,8 @@ function App() {
         setEditableThumbnailPrompt(thumbnailPrompt);
         setIntroVideoPrompt(introVideoPrompt);
         setStoryVideoPrompts(storyVideoPrompts);
+        setVideoImagePrompts(newVideoImagePrompts);
+        setVideoImages(null);
         
         const imageResults = await generateImagesForMultipleHeadlines(thumbnailPrompt, postImageDescriptions);
         setGeneratedThumbnail(imageResults.thumbnail);
@@ -266,24 +288,6 @@ function App() {
                 const newError = "The YouTube thumbnail could not be generated. This is often due to safety filters. You can try editing the prompt and regenerating it below.";
                 return prevError ? `${prevError}\n${newError}` : newError;
             });
-        }
-        
-        // Generate B-Roll Video Images
-        if (videoImagePrompts && videoImagePrompts.length > 0) {
-            setIsGeneratingVideoImages(true);
-            try {
-                const bRollImages = await generateVideoImages(videoImagePrompts);
-                setVideoImages(bRollImages);
-            } catch (e) {
-                console.error(e);
-                const bRollError = e instanceof Error ? e.message : 'An unknown error occurred.';
-                setError(prevError => {
-                    const newError = `Failed to generate B-Roll images. ${bRollError}`;
-                    return prevError ? `${prevError}\n${newError}` : newError;
-                });
-            } finally {
-                setIsGeneratingVideoImages(false);
-            }
         }
 
     } catch (e) {
@@ -320,35 +324,6 @@ function App() {
     }
   }, [editableThumbnailPrompt]);
 
-
-  const handlePlayPauseAudio = useCallback(() => {
-    const synth = window.speechSynthesis;
-    if (!generatedScript || !synth) return;
-
-    if (synth.speaking) {
-      synth.cancel();
-      return;
-    }
-
-    const newUtterance = new SpeechSynthesisUtterance(generatedScript);
-    const selectedVoice = voices.find(v => v.voiceURI === selectedVoiceURI);
-    if (selectedVoice) {
-      newUtterance.voice = selectedVoice;
-    }
-    
-    newUtterance.onstart = () => setIsSpeaking(true);
-    newUtterance.onend = () => setIsSpeaking(false);
-    newUtterance.onerror = (event) => {
-      if (event.error !== 'interrupted') {
-        console.error("SpeechSynthesis Error:", event.error);
-      }
-      setIsSpeaking(false);
-    };
-    
-    utteranceRef.current = newUtterance;
-    synth.speak(newUtterance);
-  }, [generatedScript, selectedVoiceURI, voices]);
-
   const handleDownloadAudio = useCallback(() => {
     if (!generatedScript) {
       setError("Cannot download audio, no script has been generated.");
@@ -361,8 +336,9 @@ function App() {
     try {
       const encodedScript = encodeURIComponent(generatedScript);
 
+      // URL length limit is around 2000 characters, so we check the encoded script length.
       if (encodedScript.length > 1800) { 
-        setError("Download failed. The generated script is too long for the TTS service.");
+        setError("Download failed. The generated script is too long for the TTS service. Please try a shorter script.");
         setIsDownloading(false);
         return;
       }
@@ -387,6 +363,36 @@ function App() {
       setIsDownloading(false);
     }
   }, [generatedScript]);
+
+  const handleGenerateBrollImages = useCallback(async () => {
+    if (!videoImagePrompts || videoImagePrompts.length === 0) {
+        setError("No B-roll prompts are available to generate images from.");
+        return;
+    }
+
+    setIsGeneratingVideoImages(true);
+    setVideoImages(null); // Clear old images
+    
+    try {
+        const bRollImages = await generateVideoImages(videoImagePrompts);
+        setVideoImages(bRollImages);
+        if (bRollImages.length === 0) {
+            setError(prevError => {
+                const newError = `B-Roll image generation completed, but no images were returned. This could be due to safety filters.`;
+                return prevError ? `${prevError}\n${newError}` : newError;
+            });
+        }
+    } catch (e) {
+        console.error(e);
+        const bRollError = e instanceof Error ? e.message : 'An unknown error occurred.';
+        setError(prevError => {
+            const newError = `Failed to generate B-Roll images. ${bRollError}`;
+            return prevError ? `${prevError}\n${newError}` : newError;
+        });
+    } finally {
+        setIsGeneratingVideoImages(false);
+    }
+  }, [videoImagePrompts]);
 
 
   const renderInputPanel = () => {
@@ -463,11 +469,6 @@ function App() {
             finalPrompt={finalPrompt}
             analyzedTopic={analyzedTopic}
             error={error}
-            isSpeaking={isSpeaking}
-            onPlayPauseAudio={handlePlayPauseAudio}
-            voices={voices}
-            selectedVoiceURI={selectedVoiceURI}
-            onVoiceChange={setSelectedVoiceURI}
             isDownloading={isDownloading}
             onDownloadAudio={handleDownloadAudio}
             editableThumbnailPrompt={editableThumbnailPrompt}
@@ -485,7 +486,9 @@ function App() {
         <div className="mt-12">
             <VideoBrollDisplay 
                 images={videoImages} 
-                isLoading={isGeneratingVideoImages || (isLoading && !videoImages)}
+                isLoading={isGeneratingVideoImages}
+                onGenerate={handleGenerateBrollImages}
+                canGenerate={!!videoImagePrompts && videoImagePrompts.length > 0}
             />
         </div>
         <div className="mt-12">
@@ -496,10 +499,30 @@ function App() {
             />
         </div>
         <div className="mt-12">
+            <StoryVideoImagesDisplay 
+                images={storyVideoImages} 
+                isLoading={isGeneratingStoryVideoImages}
+            />
+        </div>
+        <div className="mt-12">
             <ParagraphVideoPrompts
                 prompts={paragraphPrompts}
                 isLoading={isGeneratingParagraphPrompts}
                 error={paragraphPromptsError}
+            />
+        </div>
+        <div className="mt-12">
+            <TimelineDisplay
+                timelineScript={timelineScript}
+                isLoading={isGeneratingTimeline}
+                error={timelineError}
+            />
+        </div>
+        <div className="mt-12">
+            <VideoAssemblyTool
+                timelineScript={timelineScript}
+                anchorImage={generatedImage16x9 || generatedThumbnail}
+                bRollImages={[...(storyVideoImages || []), ...(videoImages || [])]}
             />
         </div>
         <Footer />

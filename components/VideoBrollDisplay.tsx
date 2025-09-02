@@ -3,6 +3,8 @@ import React from 'react';
 interface VideoBrollDisplayProps {
     images: string[] | null;
     isLoading: boolean;
+    onGenerate: () => void;
+    canGenerate: boolean;
 }
 
 const LoadingSpinner: React.FC = () => (
@@ -16,32 +18,57 @@ const LoadingSpinner: React.FC = () => (
     </div>
 );
 
-const VideoBrollDisplay: React.FC<VideoBrollDisplayProps> = ({ images, isLoading }) => {
-    if (!isLoading && (!images || images.length === 0)) {
+const GenerateButton: React.FC<{ onClick: () => void; disabled: boolean; children: React.ReactNode }> = ({ onClick, disabled, children }) => (
+    <button
+        onClick={onClick}
+        disabled={disabled}
+        className="px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-cyan-600 hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-cyan-500 disabled:bg-gray-600 disabled:cursor-not-allowed transition-all duration-200"
+    >
+        {children}
+    </button>
+);
+
+
+const VideoBrollDisplay: React.FC<VideoBrollDisplayProps> = ({ images, isLoading, onGenerate, canGenerate }) => {
+    // Don't render the section at all if there's nothing to generate and nothing to show
+    if (!canGenerate && !isLoading && (!images || images.length === 0)) {
         return null;
     }
+    
+    const hasImages = images && images.length > 0;
 
     return (
         <div className="flex flex-col space-y-4">
-            <h2 className="text-2xl font-semibold text-gray-100">
-                5. Generated Video B-Roll Images
-            </h2>
+            <div className="flex justify-between items-center">
+                <h2 className="text-2xl font-semibold text-gray-100">
+                    5. Video B-Roll Images
+                </h2>
+                {hasImages && !isLoading && (
+                     <button
+                        onClick={onGenerate}
+                        className="px-4 py-2 text-sm font-medium rounded-md text-cyan-300 bg-gray-700 hover:bg-gray-600 transition-colors"
+                    >
+                        Regenerate
+                    </button>
+                )}
+            </div>
             <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700 min-h-[200px] flex items-center justify-center">
-                {isLoading && (!images || images.length === 0) ? (
+                {isLoading ? (
                     <LoadingSpinner />
-                ) : (
+                ) : hasImages ? (
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4 w-full">
-                        {images?.map((src, index) => (
+                        {images.map((src, index) => (
                             <div key={index} className="bg-black rounded-lg overflow-hidden aspect-video shadow-lg hover:shadow-cyan-500/20 transition-shadow duration-300">
                                 <img src={src} alt={`B-roll image ${index + 1}`} className="w-full h-full object-cover" />
                             </div>
                         ))}
-                         {isLoading && images && images.length > 0 && (
-                            <div className="flex flex-col items-center justify-center text-center rounded-lg bg-black aspect-video">
-                                <div className="w-8 h-8 border-2 border-cyan-500 border-dashed rounded-full animate-spin"></div>
-                                <p className="mt-2 text-xs font-semibold text-gray-400">Generating more...</p>
-                            </div>
-                         )}
+                    </div>
+                ) : (
+                    <div className="text-center">
+                        <p className="text-gray-400 mb-4">Generate B-Roll images based on the generated script.</p>
+                        <GenerateButton onClick={onGenerate} disabled={!canGenerate}>
+                            Generate B-Roll Images
+                        </GenerateButton>
                     </div>
                 )}
             </div>

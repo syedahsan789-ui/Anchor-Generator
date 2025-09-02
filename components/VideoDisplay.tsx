@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 interface VideoDisplayProps {
     isLoading: boolean;
@@ -10,11 +10,6 @@ interface VideoDisplayProps {
     finalPrompt: string;
     analyzedTopic: string | null;
     error: string | null;
-    isSpeaking: boolean;
-    onPlayPauseAudio: () => void;
-    voices: SpeechSynthesisVoice[];
-    selectedVoiceURI: string | null;
-    onVoiceChange: (uri: string) => void;
     isDownloading: boolean;
     onDownloadAudio: () => void;
     editableThumbnailPrompt: string | null;
@@ -48,15 +43,21 @@ const Placeholder: React.FC = () => (
     </div>
 );
 
-const PlayIcon: React.FC = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 20 20">
+const PlayIcon: React.FC<{className?: string}> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="currentColor" viewBox="0 0 20 20">
         <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 0111 8v4a1 1 0 01-1.445.894l-3-2A1 1 0 016 9v-1a1 1 0 01.555-.894l3-2z" />
     </svg>
 );
 
-const PauseIcon: React.FC = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 20 20">
+const PauseIcon: React.FC<{className?: string}> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="currentColor" viewBox="0 0 20 20">
        <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1zm4 0a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1z" />
+    </svg>
+);
+
+const VolumeIcon: React.FC = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
     </svg>
 );
 
@@ -82,10 +83,142 @@ const ImageCard: React.FC<{ src: string; alt: string; title: string, className?:
     </div>
 );
 
+const AudioPlayer: React.FC<{
+    generatedScript: string | null;
+    isDownloading: boolean;
+    onDownloadAudio: () => void;
+}> = ({ generatedScript, isDownloading, onDownloadAudio }) => {
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [duration, setDuration] = useState(0);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [volume, setVolume] = useState(1);
+    const [audioSrc, setAudioSrc] = useState<string | null>(null);
+    const [audioError, setAudioError] = useState<string | null>(null);
+
+    useEffect(() => {
+        setIsPlaying(false);
+        setCurrentTime(0);
+        setDuration(0);
+        setAudioError(null);
+
+        if (generatedScript) {
+            const scriptForUrl = generatedScript.length > 200 ? generatedScript.substring(0, 200) : generatedScript;
+            const encodedScript = encodeURIComponent(scriptForUrl);
+            
+            if (generatedScript.length > 200) {
+                setAudioError("Audio preview is limited to the first 200 characters.");
+            }
+
+            const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedScript}&tl=en&client=tw-ob`;
+            setAudioSrc(ttsUrl);
+        } else {
+            setAudioSrc(null);
+        }
+    }, [generatedScript]);
+
+    const togglePlayPause = () => {
+        if (!audioRef.current || !audioRef.current.src) return;
+        if (isPlaying) {
+            audioRef.current.pause();
+        } else {
+            audioRef.current.play().catch(e => console.error("Audio play failed:", e));
+        }
+    };
+
+    const handleProgressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (audioRef.current) {
+            const newTime = Number(e.target.value);
+            audioRef.current.currentTime = newTime;
+            setCurrentTime(newTime);
+        }
+    };
+
+    const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (audioRef.current) {
+            const newVolume = Number(e.target.value);
+            audioRef.current.volume = newVolume;
+            setVolume(newVolume);
+        }
+    };
+
+    const formatTime = (timeInSeconds: number) => {
+        if (isNaN(timeInSeconds) || timeInSeconds === 0) return '00:00';
+        const minutes = Math.floor(timeInSeconds / 60);
+        const seconds = Math.floor(timeInSeconds % 60);
+        return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    };
+
+    return (
+        <div className="mt-4 flex flex-col gap-3">
+            {audioSrc && <audio 
+                ref={audioRef} 
+                src={audioSrc}
+                onLoadedMetadata={() => setDuration(audioRef.current?.duration || 0)}
+                onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                onEnded={() => setIsPlaying(false)}
+            />}
+            <div className="flex items-center gap-3 bg-gray-700/50 p-2 rounded-lg">
+                <button 
+                    onClick={togglePlayPause}
+                    disabled={!audioSrc || isDownloading}
+                    className="text-cyan-400 hover:text-cyan-300 transition-colors disabled:text-gray-600 disabled:cursor-not-allowed"
+                    aria-label={isPlaying ? "Pause script reading" : "Play script reading"}
+                    title={isPlaying ? "Pause script" : "Play script (English preview)"}
+                >
+                    {isPlaying ? <PauseIcon className="h-8 w-8" /> : <PlayIcon className="h-8 w-8" />}
+                </button>
+                <div className="flex-grow flex items-center gap-2">
+                    <span className="text-xs text-gray-400 font-mono w-10 text-center">{formatTime(currentTime)}</span>
+                    <input
+                        type="range"
+                        value={currentTime}
+                        max={duration || 1}
+                        onChange={handleProgressChange}
+                        disabled={!audioSrc || isDownloading}
+                        aria-label="Audio progress"
+                        className="w-full"
+                    />
+                    <span className="text-xs text-gray-400 font-mono w-10 text-center">{formatTime(duration)}</span>
+                </div>
+            </div>
+            <div className="flex items-center gap-3 bg-gray-700/50 p-2 rounded-lg">
+                 <VolumeIcon />
+                 <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={volume}
+                    onChange={handleVolumeChange}
+                    disabled={!audioSrc || isDownloading}
+                    aria-label="Volume control"
+                    className="w-24"
+                />
+                 <div className="flex-grow"></div>
+                 <button 
+                    onClick={onDownloadAudio} 
+                    className="text-cyan-400 hover:text-cyan-300 transition-colors p-2 rounded-full bg-gray-700/50 hover:bg-gray-700 disabled:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label={isDownloading ? "Downloading audio..." : "Download full audio"}
+                    title={isDownloading ? "Downloading..." : "Download full audio (MP3, English)"}
+                    disabled={isDownloading || isPlaying || !generatedScript}
+                >
+                    {isDownloading ? <SpinnerIcon /> : <DownloadIcon />}
+                </button>
+            </div>
+            <p className="text-xs text-gray-500 text-center">
+                {audioError ? audioError : 'Audio features are for English script preview only.'}
+            </p>
+        </div>
+    );
+}
+
+
 export const VideoDisplay: React.FC<VideoDisplayProps> = ({ 
     isLoading, generatedImage16x9, generatedImage9x16, generatedThumbnail, 
     generatedScript, generatedUrduScript, finalPrompt, analyzedTopic, error,
-    isSpeaking, onPlayPauseAudio, voices, selectedVoiceURI, onVoiceChange, 
     isDownloading, onDownloadAudio, editableThumbnailPrompt, onEditableThumbnailPromptChange,
     isRegeneratingThumbnail, onRegenerateThumbnail
 }) => {
@@ -102,163 +235,92 @@ export const VideoDisplay: React.FC<VideoDisplayProps> = ({
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    <p className="mt-2 text-red-400 font-semibold">Generation Failed</p>
-                    <p className="text-sm text-red-500 max-w-md mx-auto">{error}</p>
+                    <h3 className="mt-2 text-lg font-semibold text-red-300">An Error Occurred</h3>
+                    <pre className="mt-2 text-sm text-gray-400 whitespace-pre-wrap text-left bg-gray-900/50 p-2 rounded-md">{error}</pre>
                 </div>
             );
         }
-        if (generatedThumbnail) {
-             return (
-                 <div className="flex flex-col items-center space-y-2 w-full p-2">
-                    <h4 className="font-semibold text-gray-300">YouTube Thumbnail (16:9)</h4>
-                    <div className="relative bg-black rounded-lg overflow-hidden w-full flex justify-center items-center">
-                        <img src={generatedThumbnail} alt="Generated YouTube thumbnail for multi-story news" className="object-contain max-w-full max-h-[300px]" />
-                        {isRegeneratingThumbnail && (
-                            <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
-                                <SpinnerIcon className="h-10 w-10" />
-                            </div>
-                        )}
-                    </div>
-                </div>
-            );
+        if (!generatedImage16x9 && !generatedImage9x16 && !generatedThumbnail) {
+            return <Placeholder />;
         }
-        if (generatedImage16x9 || generatedImage9x16) {
-            return (
-                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full p-2">
+
+        return (
+            <div className="flex flex-col space-y-4 w-full">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {generatedImage16x9 && (
-                        <ImageCard 
-                            src={generatedImage16x9} 
-                            alt="Generated news anchor in 16:9 format"
-                            title="YouTube (16:9)"
-                        />
+                        <ImageCard src={generatedImage16x9} alt="Generated 16x9 Image" title="16:9 (Desktop)" />
                     )}
-                     {generatedImage9x16 && (
-                        <ImageCard 
-                            src={generatedImage9x16} 
-                            alt="Generated news anchor in 9:16 format"
-                            title="Shorts (9:16)"
-                        />
+                    {generatedImage9x16 && (
+                        <ImageCard src={generatedImage9x16} alt="Generated 9x16 Image" title="9:16 (Mobile)" />
                     )}
-                 </div>
-            )
-        }
-        return <Placeholder />;
+                     {generatedThumbnail && (
+                        <ImageCard src={generatedThumbnail} alt="Generated YouTube Thumbnail" title="YouTube Thumbnail (16:9)" className="sm:col-span-2" />
+                    )}
+                </div>
+
+                {generatedScript && (
+                    <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+                        <div className="flex mb-2 border-b border-gray-600">
+                             <button 
+                                onClick={() => setActiveScriptTab('english')}
+                                className={`px-3 py-1 text-sm font-semibold rounded-t-md ${activeScriptTab === 'english' ? 'bg-gray-700 text-cyan-400' : 'text-gray-400 hover:text-white'}`}
+                            >
+                                English Script
+                            </button>
+                            {generatedUrduScript && (
+                                <button 
+                                    onClick={() => setActiveScriptTab('urdu')}
+                                    className={`px-3 py-1 text-sm font-semibold rounded-t-md ${activeScriptTab === 'urdu' ? 'bg-gray-700 text-cyan-400' : 'text-gray-400 hover:text-white'}`}
+                                >
+                                    Urdu Script
+                                </button>
+                            )}
+                        </div>
+                        <div className="mt-2 text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto p-2 bg-gray-900/50 rounded-md">
+                            {activeScriptTab === 'english' ? generatedScript : generatedUrduScript}
+                        </div>
+                        <AudioPlayer 
+                           generatedScript={generatedScript}
+                           isDownloading={isDownloading}
+                           onDownloadAudio={onDownloadAudio}
+                        />
+                    </div>
+                )}
+                
+                {editableThumbnailPrompt && (
+                    <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700 space-y-2">
+                        <label htmlFor="thumbnail-prompt" className="text-sm font-semibold text-gray-300">Edit & Regenerate Thumbnail Prompt:</label>
+                        <textarea
+                            id="thumbnail-prompt"
+                            value={editableThumbnailPrompt}
+                            onChange={(e) => onEditableThumbnailPromptChange(e.target.value)}
+                            rows={3}
+                            className="w-full p-2 bg-gray-900 border border-gray-600 rounded-md focus:ring-2 focus:ring-cyan-500"
+                        />
+                        <button
+                            onClick={onRegenerateThumbnail}
+                            disabled={isRegeneratingThumbnail}
+                            className="w-full flex justify-center items-center px-4 py-2 text-sm font-medium rounded-md text-white bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-600"
+                        >
+                            {isRegeneratingThumbnail ? <SpinnerIcon className="h-5 w-5"/> : 'Regenerate Thumbnail'}
+                        </button>
+                    </div>
+                )}
+
+                 <details className="bg-gray-800/50 p-3 rounded-lg border border-gray-700 text-sm">
+                    <summary className="cursor-pointer font-semibold text-gray-400 hover:text-white">Generation Details</summary>
+                    <div className="mt-2 pt-2 border-t border-gray-600 space-y-2">
+                        {analyzedTopic && <p><strong className="text-gray-400">Analyzed Topic:</strong> {analyzedTopic}</p>}
+                        {finalPrompt && <p><strong className="text-gray-400">Final Anchor Prompt:</strong> {finalPrompt}</p>}
+                    </div>
+                </details>
+            </div>
+        );
     };
 
-    const showScript = generatedScript && !isLoading;
-    const showDetails = (analyzedTopic || finalPrompt) && !isLoading;
-
     return (
-        <div className="flex flex-col space-y-4 mt-8 lg:mt-0">
-            <h2 className="text-2xl font-semibold text-gray-100">
-                2. Generated Output
-            </h2>
-            <div className="w-full min-h-[300px] bg-gray-800 border-2 border-gray-700 rounded-lg flex items-center justify-center overflow-hidden">
-                {renderDisplayContent()}
-            </div>
-             {error && (generatedImage16x9 || generatedImage9x16 || generatedThumbnail) && (
-                <div className="p-3 text-center bg-red-900/50 border border-red-700 rounded-lg">
-                    <p className="text-sm text-red-300">{error}</p>
-                </div>
-            )}
-            
-            {editableThumbnailPrompt && (
-                 <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700 space-y-3">
-                     <h3 className="font-semibold text-cyan-400">Edit Thumbnail Prompt:</h3>
-                      <textarea
-                        value={editableThumbnailPrompt}
-                        onChange={(e) => onEditableThumbnailPromptChange(e.target.value)}
-                        rows={4}
-                        className="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors duration-200 text-gray-300 text-sm resize-y"
-                        disabled={isRegeneratingThumbnail}
-                        aria-label="Editable thumbnail prompt"
-                    />
-                    <button 
-                        onClick={onRegenerateThumbnail}
-                        disabled={isRegeneratingThumbnail}
-                        className="w-full flex justify-center items-center px-4 py-2 border border-transparent text-base font-medium rounded-md text-white bg-cyan-700 hover:bg-cyan-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-600 disabled:bg-gray-600 disabled:cursor-not-allowed transition-all duration-200"
-                    >
-                        {isRegeneratingThumbnail ? <><SpinnerIcon className="-ml-1 mr-2 h-5 w-5"/> Regenerating...</> : 'Regenerate Thumbnail'}
-                    </button>
-                 </div>
-            )}
-
-            {showScript && (
-                <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
-                    <div className="flex items-center justify-between">
-                         <h3 className="font-semibold text-cyan-400">Generated News Script:</h3>
-                         {generatedUrduScript && (
-                             <div className="flex border border-gray-600 rounded-lg">
-                                 <button onClick={() => setActiveScriptTab('english')} className={`px-3 py-1 text-sm rounded-l-md ${activeScriptTab === 'english' ? 'bg-cyan-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}`}>English</button>
-                                 <button onClick={() => setActiveScriptTab('urdu')} className={`px-3 py-1 text-sm rounded-r-md ${activeScriptTab === 'urdu' ? 'bg-cyan-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}`}>Urdu</button>
-                             </div>
-                         )}
-                    </div>
-                    
-                    {activeScriptTab === 'english' && (
-                        <p className="text-gray-300 mt-3 italic whitespace-pre-wrap">"{generatedScript}"</p>
-                    )}
-                     {activeScriptTab === 'urdu' && (
-                        <p className="text-gray-300 mt-3 italic whitespace-pre-wrap" dir="rtl">"{generatedUrduScript}"</p>
-                    )}
-                   
-                    <div className="mt-4 flex flex-wrap items-center gap-4">
-                        <select
-                            value={selectedVoiceURI ?? ''}
-                            onChange={(e) => onVoiceChange(e.target.value)}
-                            disabled={voices.length === 0 || isDownloading || isSpeaking}
-                            className="bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-sm text-gray-200 focus:ring-2 focus:ring-cyan-500 focus:outline-none flex-grow disabled:opacity-50"
-                            aria-label="Select voice"
-                        >
-                            {voices.length > 0 ? (
-                                voices.map(voice => (
-                                    <option key={voice.voiceURI} value={voice.voiceURI}>
-                                        {voice.name} ({voice.lang})
-                                    </option>
-                                ))
-                            ) : (
-                                <option>No voices available</option>
-                            )}
-                        </select>
-                         <div className="flex items-center gap-2">
-                             <button 
-                                onClick={onPlayPauseAudio} 
-                                className="text-cyan-400 hover:text-cyan-300 transition-colors disabled:text-gray-600 disabled:cursor-not-allowed p-2 rounded-full bg-gray-700/50 hover:bg-gray-700 disabled:opacity-50"
-                                aria-label={isSpeaking ? "Pause script reading" : "Play script reading"}
-                                title={isSpeaking ? "Pause script" : "Play script (English only)"}
-                                disabled={isDownloading}
-                            >
-                                {isSpeaking ? <PauseIcon /> : <PlayIcon />}
-                            </button>
-                             <button 
-                                onClick={onDownloadAudio} 
-                                className="text-cyan-400 hover:text-cyan-300 transition-colors p-2 rounded-full bg-gray-700/50 hover:bg-gray-700 disabled:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
-                                aria-label={isDownloading ? "Downloading audio..." : "Download audio"}
-                                title={isDownloading ? "Downloading..." : "Download audio (MP3, standard voice, English only)"}
-                                disabled={isDownloading || isSpeaking}
-                            >
-                                {isDownloading ? <SpinnerIcon /> : <DownloadIcon />}
-                            </button>
-                         </div>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-2 text-right">
-                        Audio features are for English script only.
-                    </p>
-                </div>
-            )}
-
-            {showDetails && !editableThumbnailPrompt && (
-                 <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
-                     <h3 className="font-semibold text-cyan-400">Generation Details:</h3>
-                     {analyzedTopic && <p className="text-sm text-gray-300 mt-2">
-                         <span className="font-medium text-gray-400">Analyzed Topic:</span>
-                         <span className="ml-2 bg-cyan-900/50 text-cyan-300 px-2 py-1 rounded-full text-xs font-mono">{analyzedTopic}</span>
-                     </p>}
-                     {finalPrompt && <p className="text-sm text-gray-400 mt-2">
-                         <span className="font-medium">Final Prompt:</span> {finalPrompt}
-                     </p>}
-                 </div>
-            )}
+        <div className="sticky top-8 bg-gray-800 p-4 rounded-lg border border-gray-700 min-h-[400px] flex items-center justify-center">
+            {renderDisplayContent()}
         </div>
     );
 };

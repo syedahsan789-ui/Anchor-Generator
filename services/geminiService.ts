@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, GenerateContentResponse, GenerateImagesResponse, Type } from "@google/genai";
 import { NewsTopic, SocialMediaContent } from '../types';
 import { BASE_ANCHOR_PROMPT } from "../constants";
@@ -352,7 +353,7 @@ export const generateContentImages = async (
     const generate = async (prompt: string, aspectRatio: '16:9' | '9:16' | '1:1'): Promise<GenerateImagesResponse | null> => {
         try {
             return await withRetry(() => ai.models.generateImages({
-                model: 'imagen-3.0-generate-002',
+                model: 'imagen-4.0-generate-001',
                 prompt: prompt,
                 config: {
                     numberOfImages: 1,
@@ -370,7 +371,7 @@ export const generateContentImages = async (
 
     // --- Define Prompts ---
     const primaryAnchorPrompt16x9 = `${baseAnchorPrompt}, with a background of ${backgroundDescription}`;
-    const primaryAnchorPrompt9x16 = `Medium close-up shot of ${baseAnchorPrompt}, with a background of ${backgroundDescription}`;
+    const primaryAnchorPrompt9x16 = `Vertical 9:16 shot of a professional news anchor sitting behind a modern news desk, centered in the frame. They are framed from the waist up, looking directly at the camera with a professional expression. The anchor is wearing a sharp suit. Behind them, the background is prominent and clearly depicts ${backgroundDescription}. The entire scene should be ultra-realistic, photorealistic, 8k, with a sharp focus on both the anchor at their desk and the detailed background.`;
     const postImagePrompt = `A high-quality, photorealistic image representing: ${postImageDescription}. Clean, professional, editorial style.`;
 
     let finalPrompt = primaryAnchorPrompt16x9;
@@ -404,13 +405,14 @@ export const generateContentImages = async (
     
     if (!result9x16?.generatedImages?.[0]) {
         console.warn("Primary 9:16 anchor image generation failed. Attempting fallback.");
-        const fallbackAnchorPrompt = `${baseAnchorPrompt}, with a background of a generic news studio.`;
+        const fallbackAnchorPrompt9x16 = `Vertical 9:16 shot of a professional news anchor sitting behind a modern news desk, centered in the frame. They are framed from the waist up, looking directly at the camera with a professional expression. The anchor is wearing a sharp suit. Behind them, the background is a generic professional news studio. The entire scene should be ultra-realistic, photorealistic, 8k, with a sharp focus on both the anchor at their desk and the detailed background.`;
          if (!fallbackUsed) {
+            const fallbackAnchorPrompt = `${baseAnchorPrompt}, with a background of a generic news studio.`;
             finalPrompt = `${fallbackAnchorPrompt} (Fallback to generic background due to content policy)`;
             fallbackUsed = true;
         }
         await delay(15000); // Add a longer delay to avoid rate-limiting
-        result9x16 = await generate(fallbackAnchorPrompt, '9:16');
+        result9x16 = await generate(fallbackAnchorPrompt9x16, '9:16');
     }
 
     const image16x9 = result16x9?.generatedImages?.[0]?.image?.imageBytes ? `data:image/jpeg;base64,${result16x9.generatedImages[0].image.imageBytes}` : null;
@@ -438,7 +440,7 @@ export const generateVideoImages = async (prompts: string[]): Promise<string[]> 
         try {
             // Use withRetry wrapper for resilience
             const result = await withRetry(() => ai.models.generateImages({
-                model: 'imagen-3.0-generate-002',
+                model: 'imagen-4.0-generate-001',
                 prompt: `${prompt}. Photorealistic, cinematic, 16:9 aspect ratio.`, // Enhance prompt
                 config: {
                     numberOfImages: 1,
@@ -615,7 +617,7 @@ export const generateImagesForMultipleHeadlines = async (
     const generate = async (prompt: string, aspectRatio: '16:9' | '1:1'): Promise<GenerateImagesResponse | null> => {
         try {
             return await withRetry(() => ai.models.generateImages({
-                model: 'imagen-3.0-generate-002',
+                model: 'imagen-4.0-generate-001',
                 prompt: prompt,
                 config: {
                     numberOfImages: 1,
@@ -694,7 +696,7 @@ export const generateImagesForMultipleHeadlines = async (
 export const regenerateThumbnail = async (prompt: string): Promise<string | null> => {
     try {
         const result = await withRetry(() => ai.models.generateImages({
-            model: 'imagen-3.0-generate-002',
+            model: 'imagen-4.0-generate-001',
             prompt: prompt,
             config: {
                 numberOfImages: 1,
@@ -779,5 +781,56 @@ export const generateParagraphVideoPrompts = async (script: string): Promise<{ p
         console.error("Failed to generate paragraph video prompts:", e);
         const errorMessage = e instanceof Error ? e.message : 'Unknown error';
         throw new Error(`Could not generate paragraph video prompts. Details: ${errorMessage}`);
+    }
+};
+
+/**
+ * Takes a script and formats it into a timeline script with paragraphs of 20-30 seconds.
+ * @param script The news script to process.
+ * @returns A promise that resolves to the formatted timeline script string.
+ */
+export const generateTimelineScript = async (script: string): Promise<string> => {
+    const prompt = `
+        You are an expert video editor and scriptwriter. Your task is to take the following news script and reformat it into a detailed video timeline script.
+
+        The script is:
+        ---
+        ${script}
+        ---
+
+        CRITICAL INSTRUCTIONS:
+        1. Break the script down into logical paragraphs.
+        2. Each paragraph MUST be timed to last approximately 20 to 30 seconds when read aloud by a professional news anchor at a natural pace.
+        3. Maintain the original tone and content of the script.
+        4. Do not add any conversational text or explanations. Your entire output should be only the reformatted script.
+        5. Use double line breaks to separate the paragraphs for clarity.
+
+        EXAMPLE OUTPUT:
+        (Paragraph 1, ~25 seconds)
+
+        (Paragraph 2, ~28 seconds)
+
+        (Paragraph 3, ~22 seconds)
+    `;
+
+    try {
+        const response: GenerateContentResponse = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: { parts: [{ text: prompt }] },
+            config: {
+                temperature: 0.5,
+            },
+        });
+
+        const timelineScript = response.text.trim();
+        if (!timelineScript) {
+            throw new Error("The AI returned an empty response for the timeline script.");
+        }
+        return timelineScript;
+
+    } catch (e) {
+        console.error("Failed to generate timeline script:", e);
+        const errorMessage = e instanceof Error ? e.message : 'Unknown error';
+        throw new Error(`Could not generate timeline script. Details: ${errorMessage}`);
     }
 };
